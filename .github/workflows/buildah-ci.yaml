@@ -21,6 +21,7 @@ on:
         type: string
       registry_username:
         description: 'The username to authenticate with the package registry.'
+        default: ${{ github.actor }}
         required: false
         type: string
       containerfiles:
