@@ -1,0 +1,48 @@
+# .pre-commit-config.yaml
+# Add this file to your project and install the pre-commit hooks:
+#   pre-commit install-hooks
+#   pre-commit install --hook-type commit-msg
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-yaml
+      - id: check-merge-conflict
+      - id: detect-aws-credentials
+      - id: detect-private-key
+      - id: end-of-file-fixer
+      - id: no-commit-to-branch
+        args: [--branch, master, --branch, main, --branch, beta]
+      - id: trailing-whitespace
+
+  - repo: https://github.com/editorconfig-checker/editorconfig-checker.python
+    rev: '3.0.3'
+    hooks:
+      - id: editorconfig-checker
+        name: check .editorconfig rules
+        alias: ec
+        exclude: ^LICENSE$
+
+  - repo: https://github.com/streetsidesoftware/cspell-cli
+    rev: v8.17.0
+    hooks:
+      - id: cspell
+        name: check spelling
+
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.43.0
+    hooks:
+      - id: markdownlint
+        name: check markdownlint
+
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.6
+    hooks:
+      - id: actionlint
+        additional_dependencies:
+        # actionlint has a shellcheck integration which extracts shell scripts
+        # in `run:` steps from GitHub Actions and checks these with shellcheck.
+        # This is arguably its most useful feature, but the integration only
+        # works if shellcheck is installed
+        - "github.com/wasilibs/go-shellcheck/cmd/shellcheck@v0.10.0"

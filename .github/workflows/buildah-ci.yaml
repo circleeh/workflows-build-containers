@@ -1,0 +1,169 @@
+---
+name: Build and Push Containers with Buildah
+
+on:
+  workflow_call:
+    inputs:
+      repo_name:
+        description: 'The repository you wish to act on'
+        required: false
+        type: string
+        default: ${{ github.repository }}
+      org_name:
+        description: 'The GitHub owner or organization of the repository'
+        required: false
+        type: string
+        default: circleeh
+      registry_base:
+        description: 'The hostname/domain of the container image registry (eg: ghcr.io)'
+        required: false
+        default: 'ghcr.io'
+        type: string
+      registry_username:
+        description: 'The username to authenticate with the package registry.'
+        required: false
+        type: string
+      containerfiles:
+        description: 'Typically "Dockerfile" or "Containerfile"'
+        required: false
+        default: 'Containerfile'
+        type: string
+      build_context:
+        description: 'The build context to use for the build'
+        required: false
+        type: string
+        default: '.'
+      image_suffix:
+        type: string
+        required: false
+        default: ''
+      image_title:
+        description: 'The title of the container image'
+        required: false
+        type: string
+        default: 'Default Container Image Title'
+      image_description:
+        description: 'The description of the container image'
+        required: false
+        type: string
+        default: ''
+      image_authors:
+        description: 'The authors of the container image'
+        required: false
+        type: string
+        default: ''
+      image_vendor:
+        description: 'The vendor of the container image'
+        required: false
+        type: string
+        default: 'Circle Eh!'
+      image_source:
+        description: 'The source of the container image'
+        required: false
+        type: string
+        default: '${{ github.server_url }}/${{ github.repository }}'
+      image_version:
+        description: 'The version of the container image'
+        required: false
+        type: string
+        default: '${{ github.sha }}'
+    secrets:
+      CALLING_GITHUB_TOKEN:
+        description: Should always be set to the CD token secret
+        required: true
+      registry_token:
+        description: The password to authenticate to the container registry. Will default to CALLING_GITHUB_TOKEN if undefined.
+        required: false
+
+permissions:
+  packages: write
+  issues: read
+  contents: write
+
+jobs:
+  build-and-push-buildah:
+    name: Build and Push Container
+    runs-on: ubuntu-24.04
+    if: always()
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.CALLING_GITHUB_TOKEN }}
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Set environment variables
+        run: |
+          SANITIZED_REPOSITORY=$(echo -n "${{ github.repository }}" | tr '[:upper:]' '[:lower:]' | tr -c '[:alnum:]/-' '-')
+          SANITIZED_IMAGE_SUFFIX=$(echo -n "${{ inputs.image_suffix }}" | tr '[:upper:]' '[:lower:]' | tr -c '[:alnum:]-' '-')
+          SHORT_SHA=$(git rev-parse --short HEAD)
+
+          {
+            echo "SANITIZED_REPOSITORY=${SANITIZED_REPOSITORY}"
+            echo "SANITIZED_IMAGE_SUFFIX=${SANITIZED_IMAGE_SUFFIX}"
+            echo "SANE_REGISTRY_IMAGE=${{ inputs.registry_base }}/${SANITIZED_REPOSITORY}${SANITIZED_IMAGE_SUFFIX}"
+            echo "SHORT_SHA=${SHORT_SHA}"
+
+            # Get the git ref (branch or tag name)
+            if [[ "${{ github.ref_type }}" == "tag" ]]; then
+              echo "GIT_REF=${GITHUB_REF#refs/tags/}"
+            else
+              GIT_REF=$(echo "${GITHUB_REF#refs/heads/}" | tr '[:upper:]' '[:lower:]' | tr '.' '-' | tr '_' '-' | tr '/' '-' | cut -c 1-50)
+              echo "GIT_REF=${GIT_REF}"
+            fi
+          } >> "$GITHUB_ENV"
+
+          # Prepare OCI labels in a separate block since it uses a different format
+          {
+            echo 'OCI_LABELS<<EOF'
+            echo "org.opencontainers.image.authors=${{ inputs.image_authors }}"
+            echo "org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            echo "org.opencontainers.image.description=${{ inputs.image_description }}"
+            echo "org.opencontainers.image.source=${{ inputs.image_source }}"
+            echo "org.opencontainers.image.title=${{ inputs.image_title }}"
+            echo "org.opencontainers.image.vendor=${{ inputs.image_vendor }}"
+            echo "org.opencontainers.image.version=${{ env.GIT_REF }}"
+            echo EOF
+          } >> "$GITHUB_ENV"
+
+      - name: Setup Build Environment
+        run: sudo apt-get update && sudo apt-get install -y buildah podman
+
+      - name: Determine Image Tags
+        id: image_tags
+        run: |
+          echo "tags=${{ env.GIT_REF }} ${{ env.SHORT_SHA }}" >> "$GITHUB_OUTPUT"
+
+      - name: Registry login
+        uses: redhat-actions/podman-login@v1
+        with:
+          registry: ${{ inputs.registry_base }}
+          username: ${{ inputs.registry_username }}
+          password: ${{ secrets.registry_token || secrets.CALLING_GITHUB_TOKEN }}
+
+      - name: Build Image
+        id: build-image
+        uses: redhat-actions/buildah-build@v2
+        with:
+          image: ${{ env.SANITIZED_REPOSITORY }}${{ env.SANITIZED_IMAGE_SUFFIX }}
+          tags: |
+            ${{ steps.image_tags.outputs.tags }}
+          containerfiles: |
+            ${{ inputs.containerfiles }}
+          context: ${{ inputs.build_context }}
+          oci: true
+          layers: true
+          labels: |
+            ${{ env.OCI_LABELS }}
+          extra-args: |
+            --cache-from=${{ inputs.registry_base }}/${{ env.SANITIZED_REPOSITORY }}
+            --cache-to=${{ inputs.registry_base }}/${{ env.SANITIZED_REPOSITORY }}
+
+      - name: Push Image(s) to Registry
+        uses: redhat-actions/push-to-registry@v2
+        with:
+          image: ${{ steps.build-image.outputs.image }}
+          tags: ${{ steps.build-image.outputs.tags }}
+          registry: ${{ inputs.registry_base }}

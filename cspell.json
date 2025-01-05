@@ -1,0 +1,19 @@
+{
+    "version": "0.2",
+    "ignorePaths": [],
+    "dictionaryDefinitions": [],
+    "dictionaries": [],
+    "words": [
+        "alnum",
+        "Buildah",
+        "circleeh",
+        "Containerfile",
+        "containerfiles",
+        "conventionalcommits",
+        "opencontainers",
+        "shellcheck",
+        "wasilibs"
+    ],
+    "ignoreWords": [],
+    "import": []
+}
